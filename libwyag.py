@@ -89,6 +89,8 @@ class GitRepository(object):
 
 def repo_path(repo, *path):
     """Compute path under repo's gitdir."""
+    print("In repo path function")
+    print("MERGING: ", repo, "AND ", *path)
     return os.path.join(repo.gitdir, *path)
 
 
@@ -155,7 +157,6 @@ def repo_create(path):
 
 def repo_default_config():
     ret = configparser.ConfigParser()
-
     ret.add_section("core")
     ret.set("core", "repositoryformatversion", "0")
     ret.set("core", "filemode", "false")
@@ -197,6 +198,42 @@ def repo_find(path=".", required=True):
             return None
     # Recursive Case
     return repo_find(parent, required)
+
+
+class GitObject(object):
+    def __init__(self, data=None):
+        if data != None:
+            self.deserialize(data)
+        else:
+            self.init()
+
+    def serialize(self, repo):
+        """This function MUST be implemented by subclasses.
+        It must read the object's contents from self.data, a byte string,
+        and do whatever it takes to convert it into a meaningful representation.
+        What that means, depends on each subclass."""
+
+        raise Exception("Unimplemented!")
+
+    def deserialize(self, data):
+        raise Exception("Unimplemented!")
+
+    def init(self):
+        pass  # Just do nothing. This is a reasonable default
+
+
+def object_read(repo, sha):
+    """Read object sha from Git repository repo.
+    Return a GitObject whose exact type depends on the object."""
+
+    path = repo_file(repo, "objects", sha[0:2], sha[2:])
+    if not os.path.isfile(path):
+        return None
+    
+    with open(path, "rb") as f:
+        raw = zlib.decompress(f.read())
+        # Read object type
+        
 
 
 if __name__ == "__main__":
