@@ -1,6 +1,6 @@
 # file: libwyag.py
 # author: Yug Patel
-# last modified: 16 December 2024
+# last modified: 23 December 2024
 
 import re
 import os
@@ -89,6 +89,8 @@ class GitRepository(object):
 
 def repo_path(repo, *path):
     """Compute path under repo's gitdir."""
+    print("In repo path function")
+    print("MERGING: ", repo, "AND ", *path)
     return os.path.join(repo.gitdir, *path)
 
 
@@ -155,7 +157,6 @@ def repo_create(path):
 
 def repo_default_config():
     ret = configparser.ConfigParser()
-
     ret.add_section("core")
     ret.set("core", "repositoryformatversion", "0")
     ret.set("core", "filemode", "false")
@@ -197,6 +198,89 @@ def repo_find(path=".", required=True):
             return None
     # Recursive Case
     return repo_find(parent, required)
+
+
+class GitObject(object):
+    def __init__(self, data=None):
+        if data != None:
+            self.deserialize(data)
+        else:
+            self.init()
+
+    def serialize(self, repo):
+        """This function MUST be implemented by subclasses.
+        It must read the object's contents from self.data, a byte string,
+        and do whatever it takes to convert it into a meaningful representation.
+        What that means, depends on each subclass."""
+
+        raise Exception("Unimplemented!")
+
+    def deserialize(self, data):
+        raise Exception("Unimplemented!")
+
+    def init(self):
+        pass  # Just do nothing. This is a reasonable default
+
+
+def object_read(repo, sha):
+    """Read object sha from Git repository repo.
+    Return a GitObject whose exact type depends on the object."""
+
+    path = repo_file(repo, "objects", sha[0:2], sha[2:])
+    if not os.path.isfile(path):
+        return None  # Object not found
+
+    with open(path, "rb") as f:
+        raw = zlib.decompress(f.read())
+        # Read object type
+        x = raw.find(b" ")  # index of space
+        object_type = raw[0:x]
+
+        # Read and validate object size
+        y = raw.find(b"\x00", x)  # index of null character
+        # size exists b/w space and null char, size is number of chars after null chars
+        # which is the real size of the file
+        size = int(raw[x:y].decode("ascii"))
+        if size != len(raw) - y - 1:
+            raise Exception("Malformed object {0}: bad length".format(sha))
+
+        # Pick constructor
+        match object_type:
+            case b"commit":
+                c = GitCommit
+            case b"tree":
+                c = GitTree
+            case b"tag":
+                c = GitTag
+            case b"blob":
+                c = GitBlob
+            case _:
+                raise Exception(
+                    "Unknown type {0} for object {1}".format(
+                        object_type.decode("ascii"), sha
+                    )
+                )
+        # Call constructor and return object
+        return c(raw[y + 1 :])
+
+
+def object_write(obj, repo=None):
+    # Serialize object data
+    data = obj.serialize()
+    # Add header
+    result = obj.object_type + b" " + str(len(data)).encode() + b"\x00" + data
+    # Compute hash
+    sha = hashlib.sha1(result).hexdigest()
+
+    if repo:
+        # Compute path
+        path = repo_file(repo, "objects", sha[0:2], mkdir=True)
+
+        if not os.path.exists(path):
+            with open(path, "wb") as f:
+                # Compress and write
+                f.write(zlib.compress(result))
+    return sha
 
 
 if __name__ == "__main__":
