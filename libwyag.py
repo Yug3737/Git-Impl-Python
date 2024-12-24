@@ -89,8 +89,8 @@ class GitRepository(object):
 
 def repo_path(repo, *path):
     """Compute path under repo's gitdir."""
-    print("In repo path function")
-    print("MERGING: ", repo, "AND ", *path)
+    # print("In repo path function")
+    # print("MERGING: ", repo, "AND ", *path)
     return os.path.join(repo.gitdir, *path)
 
 
@@ -281,6 +281,148 @@ def object_write(obj, repo=None):
                 # Compress and write
                 f.write(zlib.compress(result))
     return sha
+
+
+class GitBlob(GitObject):
+    object_type = b"blob"
+
+    def serialize(self):
+        return self.blobdata
+
+    def serialize(self, data):
+        self.blobdata = data
+
+
+argsp = argsubparsers.add_parser(
+    "cat-file", help="Provide content of repository objects."
+)
+argsp.add_argument(
+    "type",
+    metavar="type",
+    choices=["blob", "commit", "tag", "tree"],
+    help="Specify the type of object",
+)
+argsp.add_argument("object", metavar="object", help="The object to display")
+
+
+def cmd_cat_file(args):
+    repo = repo_find()
+    cat_file(repo, args.object, object_type=args.type.encode())
+
+
+def cat_file(repo, obj, object_type=None):
+    obj = object_read(repo, object_find(repo, obj, object_type=object_type))
+    sys.stdout.buffer.write(obj.serialize())
+
+
+def object_find(repo, name, object_type=None, follow=True):
+    return name
+
+
+argsp = argsubparsers.add_parser(
+    "hash-object", help="Compute object ID and optionally creates a blob from a file"
+)
+argsp.add_argument(
+    "-t",
+    metavar="type",
+    dest="type",
+    choices=["blob", "commit", "tag", "tree"],
+    default="blob",
+    help="Specify the object type",
+)
+argsp.add_argument(
+    "-w",
+    dest="write",
+    action="store_true",
+    help="Actually write the object into the database",
+)
+argsp.add_argument("path", help="Read object from <file>")
+
+
+def cmd_hash_object(args):
+    if args.write:
+        repo = repo.find()
+    else:
+        repo = None
+
+    with open(args.path, "rb") as fd:
+        sha = object_hash(fd, args.type.encode(), repo)
+        print(sha)
+
+
+def object_hash(fd, object_type, repo=None):
+    """Hash objec, writing it to repo of provided."""
+    data = fd.read()
+    # Choose a constructor according to object_type argument
+    match object_type:
+        case b"commit":
+            obj = GitCommit(data)
+        case b"tree":
+            obj = GitTree(data)
+        case b"tag":
+            obj = GitTag(data)
+        case b"blob":
+            obj = GitBlob(data)
+        case _:
+            raise Exception(f"Unknown type {object_type}")
+    return object_write(obj, repo)
+
+
+def kvlm_parse(raw, start=0, dict=None):
+    if not dict:
+        dict = collections.OrderedDict()
+        # We CANNOT declare the argument as dict = OrderedDict() or all
+        # call to the functions will endlessly grow the same dict
+
+    # This function is recursive: it reads a key/value pair, then call
+    # itself back with the new position. So we first need to know
+    # where we are: at a keyword, or already in the messageQ
+
+    # We search for the next space and the next newLine.
+    space = raw.find(b" ", start)
+    endline = raw.find(b"\n", start)
+
+    # If space appears befoe newline, we have a keyword. Otherwise,
+    # it's the final message, which we just read to the end of the file.
+
+    # Base case
+    # If newline appears first (or there's no space at all, in which
+    # case find returns -1), we assume a blank line. A blank line
+    # means the remainder of the data is the message. We store it in the
+    # dictionary, with None as the key, and return.
+
+    if (space < 0) or (endline < space):
+        assert endline == start
+        dict[None] = raw[start + 1 :]
+        return dict
+
+    # Recursive case
+    # we read a key-value pair and recurse for the next
+    key = raw[start:space]
+
+    # Find the end of the value. Continuation lines begin with a
+    # space, so we loop until we find a "\n" not followed by a space
+
+    end = start
+    while True:
+        end = raw.find(b"\n", end + 1)
+        if raw[end + 1] != ord(" "):
+            break
+
+    # Grab the value
+    # Also, drop the leading space on continuation lines
+    value = raw[space + 1 : end].replace(b"\n", b"\n")
+
+    # Don't overwrite existing data contents
+    if key in dict:
+        if type(dict[key]) == list:
+            dict[key].append(value)
+        else:
+            dict[key] = [dict[key], value]
+    else:
+        dict[key] = value
+
+    return kvlm_parse(raw, start=end + 1, dict=dict)
 
 
 if __name__ == "__main__":
