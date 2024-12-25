@@ -411,7 +411,7 @@ def kvlm_parse(raw, start=0, dict=None):
 
     # Grab the value
     # Also, drop the leading space on continuation lines
-    value = raw[space + 1 : end].replace(b"\n", b"\n")
+    value = raw[space + 1 : end].replace(b"\n ", b"\n")
 
     # Don't overwrite existing data contents
     if key in dict:
@@ -423,6 +423,64 @@ def kvlm_parse(raw, start=0, dict=None):
         dict[key] = value
 
     return kvlm_parse(raw, start=end + 1, dict=dict)
+
+
+def kvlm_serialize(kvlm):
+    ret = b""
+
+    # Output fields
+    for k in kvlm.keys():
+        # Skip the message itself
+        if k == None:
+            continue
+        val = kvlm[k]
+        # Normalize to a list
+        if type(val) != list:
+            val = [val]
+
+        for v in val:
+            ret += k + b" " + (v.replace(b"\n", b"\n ")) + b"\n"
+
+    # Append message
+    ret += b"\n" + kvlm[None] + b"\n"
+
+    return ret
+
+
+class GitCommit(GitObject):
+    object_type = b"commit"
+
+    def serialize(self, data):
+        self.kvlm = kvlm_parse(data)
+
+    def serialize(self):
+        return kvlm_serialize(self.kvlm)
+
+    def init(self):
+        self.kvlm = dict()
+
+
+argsp = argsubparsers.add_parser("log", help="Display history of a given commit.")
+argsp.add_argument("commit", default="HEAD", nargs="?", help="Commit to start at.")
+
+
+def cmd_log(args):
+    repo = repo_find()
+
+    print("digraph wyaglog{")
+    print("  node[shape=rect]")
+    log_graphviz(repo, object_find(repo, args.commit), set())
+    print("}")
+
+
+def log_graphviz(repo, sha, seen):
+    if sha in seen:
+        return
+    seen.add(sha)
+
+    commit = object_read(repo, sha)
+    short_hash = sha[0:8]
+    message = commit.kvlm[None].decode("utf8").strip()
 
 
 if __name__ == "__main__":
