@@ -481,6 +481,28 @@ def log_graphviz(repo, sha, seen):
     commit = object_read(repo, sha)
     short_hash = sha[0:8]
     message = commit.kvlm[None].decode("utf8").strip()
+    message = message.replace("\\", "\\\\")
+    message = message.replace('"', '\\"')
+
+    if "\n" in message:  # Keep only the first line
+        message = message[: message.index("\n")]
+
+    print(" c_{0} [label='{1}: {2}\"]".format(sha, sha[0:7], message))
+    assert commit.object_type == b"commit"
+
+    if not b"parent" in commit.kvlm.keys():
+        # Base case: the initial commit
+        return
+
+    parents = commit.kvlm[b"parent"]
+
+    if type(parents) != list:
+        parents = [parents]
+
+    for p in parents:
+        p = p.decode("ascii")
+        print(" c_{0} -> c_{1};".format(sha, p))
+        log_graphviz(repo, p, seen)
 
 
 if __name__ == "__main__":
